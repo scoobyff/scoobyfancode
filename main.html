@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Events</title>
+    <style>
+        @keyframes heartbeat {
+            0% { transform: scale(1); box-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+            50% { transform: scale(1.02); box-shadow: 0 0 20px rgba(255, 215, 0, 0.8); }
+            100% { transform: scale(1); box-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+        }
+
+        @keyframes livePulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: #121212;
+            color: white;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 26px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+        }
+        .event-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+        .event {
+            width: 400px;
+            background: #222;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            padding-bottom: 15px;
+            animation: heartbeat 3s infinite;
+            transition: transform 0.3s;
+        }
+        .event:hover {
+            transform: scale(1.03);
+        }
+        .event img {
+            width: 100%;
+            height: 220px;
+            object-fit: cover;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+        }
+        .event-content {
+            padding: 15px;
+        }
+        .title {
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            margin-bottom: 5px;
+        }
+        .league {
+            font-size: 14px;
+            color: #bbb;
+            margin-bottom: 10px;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .watch-btn {
+            display: block;
+            width: 90%;
+            padding: 12px;
+            background: transparent;
+            color: white;
+            text-decoration: none;
+            border: 2px solid gold;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 0 auto;
+            text-align: center;
+            transition: all 0.3s ease-in-out;
+        }
+        .watch-btn:hover {
+            background: gold;
+            color: black;
+            transform: scale(1.1);
+            box-shadow: 0 0 25px gold;
+        }
+        .live-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: red;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 5px;
+            animation: livePulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Live Events</h1>
+    <div class="event-container" id="events"></div>
+
+    <script>
+        async function fetchEvents() {
+            try {
+                const response = await fetch("https://raw.githubusercontent.com/drmlive/fancode-live-events/refs/heads/main/fancode.json");
+                const data = await response.json();
+                
+                const container = document.getElementById("events");
+                container.innerHTML = ""; 
+
+                data.matches.forEach(event => {
+                    const eventDiv = document.createElement("div");
+                    eventDiv.classList.add("event");
+
+                    let eventDate = new Date(event.startTime);
+                    let formattedDate = eventDate.toLocaleDateString();
+                    let formattedTime = eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    let isLive = event.status === "LIVE"; // Check if match is live
+                    let videoLink = event.dai_url ? `https://scoobyff.github.io/scoobyfancode/?url=${event.dai_url}` : "#";
+
+                    eventDiv.innerHTML = `
+                        <img src="${event.src}" alt="${event.title}">
+                        ${isLive ? `<div class="live-badge">LIVE</div>` : ""}
+                        <div class="event-content">
+                            <div class="title">${event.title}</div>
+                            <div class="league">${event.event_name}</div>
+                            <div class="buttons">
+                                ${event.dai_url ? `<a href="${videoLink}" target="_blank" class="watch-btn">Watch Now</a>` : ''}
+                                ${event.dai_url ? `<a href="${videoLink}" target="_blank" class="watch-btn">Ad-Free</a>` : ''}
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(eventDiv);
+                });
+
+            } catch (error) {
+                console.error("Error fetching events:", error);
+            }
+        }
+
+        fetchEvents();
+    </script>
+
+</body>
+</html>
