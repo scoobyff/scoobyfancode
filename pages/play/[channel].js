@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
+import Script from 'next/script';
 import { channels } from '../../lib/channels';
 
 export default function ChannelPlayer() {
@@ -9,6 +10,7 @@ export default function ChannelPlayer() {
   const playerRef = useRef(null);
   const [channel, setChannel] = useState(null);
   const [error, setError] = useState(null);
+  const [scriptsLoaded, setScriptsLoaded] = useState(0);
 
   useEffect(() => {
     if (!channelName) return;
@@ -26,138 +28,136 @@ export default function ChannelPlayer() {
   }, [channelName]);
 
   useEffect(() => {
-    if (!channel || typeof window === 'undefined') return;
+    if (!channel || scriptsLoaded < 2 || !playerRef.current) return;
 
-    // Load scripts dynamically
-    const loadScripts = async () => {
-      // Load HLS.js
-      if (!window.Hls) {
-        const hlsScript = document.createElement('script');
-        hlsScript.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js';
-        hlsScript.async = true;
-        document.head.appendChild(hlsScript);
-        
-        await new Promise((resolve) => {
-          hlsScript.onload = resolve;
-        });
-      }
+    // Clear any existing content
+    playerRef.current.innerHTML = '';
 
-      // Load DPlayer
-      if (!window.DPlayer) {
-        const dplayerScript = document.createElement('script');
-        dplayerScript.src = 'https://cdn.jsdelivr.net/npm/dplayer@1.26.0/dist/DPlayer.min.js';
-        dplayerScript.async = true;
-        document.head.appendChild(dplayerScript);
-        
-        await new Promise((resolve) => {
-          dplayerScript.onload = resolve;
-        });
-      }
-
-      // Initialize player
-      if (window.DPlayer && playerRef.current) {
-        const dp = new window.DPlayer({
-          container: playerRef.current,
-          autoplay: true,
-          volume: 0.8,
-          video: {
-            url: channel.url,
-            type: 'hls'
+    try {
+      const dp = new window.DPlayer({
+        container: playerRef.current,
+        autoplay: true,
+        volume: 0.8,
+        video: {
+          url: channel.url,
+          type: 'hls',
+          customType: {
+            hls: function(video, player) {
+              if (window.Hls.isSupported()) {
+                const hls = new window.Hls({
+                  enableWorker: false,
+                  lowLatencyMode: true,
+                  backBufferLength: 90
+                });
+                hls.loadSource(video.src);
+                hls.attachMedia(video);
+              } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = video.src;
+              }
+            }
           }
-        });
+        },
+        theme: '#FADFA3',
+        loop: false,
+        screenshot: false,
+        hotkey: true,
+        preload: 'auto',
+        mutex: true
+      });
 
-        // Force autoplay with sound (with fallback)
-        const tryAutoPlay = async () => {
-          const video = dp.video;
+      // Handle autoplay
+      const handleAutoplay = async () => {
+        try {
+          dp.video.muted = false;
+          dp.video.volume = 0.8;
+          await dp.play();
+        } catch (e) {
+          console.log('Autoplay failed, will try muted first');
           try {
-            video.muted = false;
-            video.volume = 0.8;
-            await video.play();
-          } catch {
-            try {
-              video.muted = true;
-              await video.play();
-              video.muted = false;
-            } catch {}
-          }
-        };
-
-        tryAutoPlay();
-
-        ['click', 'touchstart', 'keydown'].forEach(evt =>
-          document.addEventListener(evt, () => {
-            if (dp.video.muted) {
+            dp.video.muted = true;
+            await dp.play();
+            // Unmute on first user interaction
+            const handleInteraction = () => {
               dp.video.muted = false;
               dp.video.volume = 0.8;
-            }
-          }, { once: true })
-        );
-      }
-    };
+              document.removeEventListener('click', handleInteraction);
+              document.removeEventListener('touchstart', handleInteraction);
+            };
+            document.addEventListener('click', handleInteraction);
+            document.addEventListener('touchstart', handleInteraction);
+          } catch (e2) {
+            console.log('Failed to play even muted:', e2);
+          }
+        }
+      };
 
-    loadScripts();
-  }, [channel]);
+      // Wait a bit for the player to initialize
+      setTimeout(handleAutoplay, 1000);
 
-  if (error) {
-    return (
-      <>
-        <Head>
-          <title>Channel Player - Error</title>
-        </Head>
-        <div style={{
-          color: 'white',
-          textAlign: 'center',
-          marginTop: '20%',
-          background: '#000',
-          height: '100vh',
-          width: '100vw',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <h1>{error}</h1>
-        </div>
-      </>
-    );
-  }
-
-  if (!channel) {
-    return (
-      <>
-        <Head>
-          <title>Channel Player - Loading</title>
-        </Head>
-        <div style={{
-          color: 'white',
-          textAlign: 'center',
-          marginTop: '20%',
-          background: '#000',
-          height: '100vh',
-          width: '100vw',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}>
-          <h1>Loading...</h1>
-        </div>
-      </>
-    );
-  }
+    } catch (e) {
+      console.error('Player initialization error:', e);
+      setError('Failed to initialize player');
+    }
+  }, [channel, scriptsLoaded]);
 
   return (
     <>
       <Head>
-        <title>{channel.name} - Channel Player</title>
+        <title>{channel ? channel.name : 'Channel Player'}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       </Head>
-      <div 
-        ref={playerRef}
-        style={{
-          width: '100vw',
-          height: '100vh',
-          background: '#000'
-        }}
+
+      <Script 
+        src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"
+        onLoad={() => setScriptsLoaded(prev => prev + 1)}
+        strategy="beforeInteractive"
       />
+      
+      <Script 
+        src="https://cdn.jsdelivr.net/npm/dplayer@1.26.0/dist/DPlayer.min.js"
+        onLoad={() => setScriptsLoaded(prev => prev + 1)}
+        strategy="beforeInteractive"
+      />
+
+      {error ? (
+        <div style={{
+          color: 'white',
+          textAlign: 'center',
+          background: '#000',
+          height: '100vh',
+          width: '100vw',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '24px'
+        }}>
+          <h1>{error}</h1>
+        </div>
+      ) : !channel ? (
+        <div style={{
+          color: 'white',
+          textAlign: 'center',
+          background: '#000',
+          height: '100vh',
+          width: '100vw',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '24px'
+        }}>
+          <h1>Loading channel...</h1>
+        </div>
+      ) : (
+        <div 
+          ref={playerRef}
+          style={{
+            width: '100vw',
+            height: '100vh',
+            background: '#000'
+          }}
+        />
+      )}
+
       <style jsx global>{`
         html, body {
           margin: 0;
@@ -166,10 +166,24 @@ export default function ChannelPlayer() {
           height: 100%;
           width: 100%;
           overflow: hidden;
+          font-family: Arial, sans-serif;
         }
         #__next {
           height: 100%;
           width: 100%;
+        }
+        .dplayer {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        .dplayer-video-wrap {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        .dplayer-video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover;
         }
       `}</style>
     </>
