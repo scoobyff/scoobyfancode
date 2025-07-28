@@ -1,18 +1,14 @@
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
-import Script from 'next/script';
 import { channels } from '../../lib/channels';
 
-export default function SimpleChannelPlayer() {
+export default function ChannelPlayer() {
   const router = useRouter();
   const { channel: channelName } = router.query;
-  const videoRef = useRef(null);
-  const hlsRef = useRef(null);
+  const playerRef = useRef(null);
   const [channel, setChannel] = useState(null);
   const [error, setError] = useState(null);
-  const [hlsLoaded, setHlsLoaded] = useState(false);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!channelName) return;
@@ -23,7 +19,6 @@ export default function SimpleChannelPlayer() {
 
     if (!foundChannel) {
       setError('Channel not found');
-      setLoading(false);
       return;
     }
 
@@ -31,131 +26,77 @@ export default function SimpleChannelPlayer() {
   }, [channelName]);
 
   useEffect(() => {
-    if (!channel || !hlsLoaded || !videoRef.current) return;
+    if (!channel || typeof window === 'undefined') return;
 
-    const video = videoRef.current;
-    
-    const initializePlayer = () => {
-      try {
-        if (window.Hls && window.Hls.isSupported()) {
-          // Clean up existing HLS instance
-          if (hlsRef.current) {
-            hlsRef.current.destroy();
+    // Load scripts dynamically
+    const loadScripts = async () => {
+      // Load HLS.js
+      if (!window.Hls) {
+        const hlsScript = document.createElement('script');
+        hlsScript.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js';
+        hlsScript.async = true;
+        document.head.appendChild(hlsScript);
+        
+        await new Promise((resolve) => {
+          hlsScript.onload = resolve;
+        });
+      }
+
+      // Load DPlayer
+      if (!window.DPlayer) {
+        const dplayerScript = document.createElement('script');
+        dplayerScript.src = 'https://cdn.jsdelivr.net/npm/dplayer@1.26.0/dist/DPlayer.min.js';
+        dplayerScript.async = true;
+        document.head.appendChild(dplayerScript);
+        
+        await new Promise((resolve) => {
+          dplayerScript.onload = resolve;
+        });
+      }
+
+      // Initialize player
+      if (window.DPlayer && playerRef.current) {
+        const dp = new window.DPlayer({
+          container: playerRef.current,
+          autoplay: true,
+          volume: 0.8,
+          video: {
+            url: channel.url,
+            type: 'hls'
           }
+        });
 
-          const hls = new window.Hls({
-            enableWorker: false,
-            lowLatencyMode: true,
-            backBufferLength: 90,
-            maxBufferLength: 30,
-            maxMaxBufferLength: 600,
-            maxBufferSize: 60 * 1000 * 1000,
-            maxBufferHole: 0.5,
-            liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 10
-          });
-
-          hlsRef.current = hls;
-
-          hls.loadSource(channel.url);
-          hls.attachMedia(video);
-
-          hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-            console.log('HLS manifest parsed');
-            setLoading(false);
-            
-            // Try to play
-            const playVideo = async () => {
-              try {
-                video.muted = false;
-                video.volume = 0.8;
-                await video.play();
-                console.log('Video started playing');
-              } catch (e) {
-                console.log('Autoplay failed, trying muted');
-                try {
-                  video.muted = true;
-                  await video.play();
-                  console.log('Video started playing muted');
-                  
-                  // Add click to unmute
-                  const unmute = () => {
-                    video.muted = false;
-                    video.volume = 0.8;
-                    document.removeEventListener('click', unmute);
-                    document.removeEventListener('touchstart', unmute);
-                  };
-                  document.addEventListener('click', unmute);
-                  document.addEventListener('touchstart', unmute);
-                } catch (e2) {
-                  console.error('Failed to play video:', e2);
-                  setError('Failed to play video');
-                }
-              }
-            };
-
-            setTimeout(playVideo, 500);
-          });
-
-          hls.on(window.Hls.Events.ERROR, (event, data) => {
-            console.error('HLS error:', data);
-            if (data.fatal) {
-              switch (data.type) {
-                case window.Hls.ErrorTypes.NETWORK_ERROR:
-                  console.log('Network error, trying to recover...');
-                  hls.startLoad();
-                  break;
-                case window.Hls.ErrorTypes.MEDIA_ERROR:
-                  console.log('Media error, trying to recover...');
-                  hls.recoverMediaError();
-                  break;
-                default:
-                  setError('Cannot recover from HLS error');
-                  break;
-              }
-            }
-          });
-
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          // Native HLS support (Safari)
-          video.src = channel.url;
-          setLoading(false);
-          
-          const playVideo = async () => {
+        // Force autoplay with sound (with fallback)
+        const tryAutoPlay = async () => {
+          const video = dp.video;
+          try {
+            video.muted = false;
+            video.volume = 0.8;
+            await video.play();
+          } catch {
             try {
-              video.muted = false;
-              video.volume = 0.8;
+              video.muted = true;
               await video.play();
-            } catch (e) {
-              try {
-                video.muted = true;
-                await video.play();
-              } catch (e2) {
-                setError('Failed to play video');
-              }
+              video.muted = false;
+            } catch {}
+          }
+        };
+
+        tryAutoPlay();
+
+        ['click', 'touchstart', 'keydown'].forEach(evt =>
+          document.addEventListener(evt, () => {
+            if (dp.video.muted) {
+              dp.video.muted = false;
+              dp.video.volume = 0.8;
             }
-          };
-
-          video.addEventListener('loadedmetadata', playVideo);
-        } else {
-          setError('HLS not supported in this browser');
-        }
-      } catch (e) {
-        console.error('Player initialization error:', e);
-        setError('Failed to initialize player');
+          }, { once: true })
+        );
       }
     };
 
-    initializePlayer();
-
-    // Cleanup function
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, [channel, hlsLoaded]);
+    loadScripts();
+  }, [channel]);
 
   if (error) {
     return (
@@ -166,17 +107,38 @@ export default function SimpleChannelPlayer() {
         <div style={{
           color: 'white',
           textAlign: 'center',
+          marginTop: '20%',
           background: '#000',
           height: '100vh',
           width: '100vw',
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '18px'
+          justifyContent: 'center'
         }}>
-          <h1>⚠️ {error}</h1>
-          <p>Please try refreshing the page or selecting a different channel.</p>
+          <h1>{error}</h1>
+        </div>
+      </>
+    );
+  }
+
+  if (!channel) {
+    return (
+      <>
+        <Head>
+          <title>Channel Player - Loading</title>
+        </Head>
+        <div style={{
+          color: 'white',
+          textAlign: 'center',
+          marginTop: '20%',
+          background: '#000',
+          height: '100vh',
+          width: '100vw',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <h1>Loading...</h1>
         </div>
       </>
     );
@@ -185,51 +147,17 @@ export default function SimpleChannelPlayer() {
   return (
     <>
       <Head>
-        <title>{channel ? `${channel.name} - Live` : 'Channel Player'}</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+        <title>{channel.name} - Channel Player</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       </Head>
-
-      <Script 
-        src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"
-        onLoad={() => setHlsLoaded(true)}
-        strategy="beforeInteractive"
+      <div 
+        ref={playerRef}
+        style={{
+          width: '100vw',
+          height: '100vh',
+          background: '#000'
+        }}
       />
-
-      <div style={{
-        width: '100vw',
-        height: '100vh',
-        background: '#000',
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        {loading && (
-          <div style={{
-            position: 'absolute',
-            color: 'white',
-            fontSize: '18px',
-            zIndex: 10
-          }}>
-            Loading {channel?.name}...
-          </div>
-        )}
-        
-        <video
-          ref={videoRef}
-          controls
-          autoPlay
-          muted={false}
-          playsInline
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-            backgroundColor: '#000'
-          }}
-        />
-      </div>
-
       <style jsx global>{`
         html, body {
           margin: 0;
@@ -238,17 +166,10 @@ export default function SimpleChannelPlayer() {
           height: 100%;
           width: 100%;
           overflow: hidden;
-          font-family: Arial, sans-serif;
         }
         #__next {
           height: 100%;
           width: 100%;
-        }
-        video::-webkit-media-controls-panel {
-          background-color: rgba(0, 0, 0, 0.8);
-        }
-        video::-webkit-media-controls {
-          background-color: rgba(0, 0, 0, 0.8);
         }
       `}</style>
     </>
